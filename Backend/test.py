@@ -1,7 +1,5 @@
-from app.utils.security import hash_password, verify_password
+from app.utils.jwt_handler import create_access_token
 
-hashed = hash_password("123456")
+token = create_access_token("123456")
 
-print(hashed)
-
-verify_password("123456", hashed)
+print(token)
