@@ -1,281 +1,244 @@
+# Backend
 
-# Backend Architecture Overview
+A robust FastAPI backend powering real-time mock interviews with collaborative coding, slot scheduling, and JWT-based authentication.
 
+---
 
-           main.py  (root)
-              │
-      ┌───────┼────────┐
-   routers  controllers  database
-      │           │          │
-   auth.py     auth.py    mongodb
-   slot.py     slot.py
+## Tech Stack
 
+| Layer | Technology |
+|---|---|
+| Framework | FastAPI |
+| Database | MongoDB |
+| Real-time | WebSockets + WebRTC |
+| Authentication | JWT (JSON Web Tokens) |
+| Password Security | bcrypt |
+| Validation | Pydantic |
+| Server | Uvicorn |
 
-The backend is implemented using FastAPI and follows a modular architecture where responsibilities are separated into routers, controllers, utilities, middleware, and database layers.
+---
 
-Initial backend structure:
+## Project Structure
 
-Backend Tree
+```
+backend/
+├── app/
+│   ├── controllers/
+│   │   ├── auth_controller.py
+│   │   └── slot_controller.py
+│   ├── routers/
+│   │   ├── auth_router.py
+│   │   ├── slot_router.py
+│   │   └── user_router.py
+│   ├── middleware/
+│   │   └── auth_middleware.py
+│   ├── schemas/
+│   │   ├── user_schema.py
+│   │   └── slot_schema.py
+│   ├── websocket/
+│   │   └── connection_manager.py
+│   ├── utils/
+│   │   ├── security.py
+│   │   ├── jwt_handler.py
+│   │   ├── serializer.py
+│   │   ├── room_storage.py
+│   │   └── cleanup_rooms.py
+│   ├── database.py
+│   └── main.py
+└── rooms/
+```
 
-           main.py  (root)
-              │
-      ┌───────┼────────┐
-   routers  controllers  database
-      │           │          │
-   auth.py     auth.py    mongodb
-   slot.py     slot.py
-Responsibility of each layer
-Layer	Responsibility
-main.py	Entry point of the backend server
-routers	Define API endpoints
-controllers	Business logic for each feature
-database	MongoDB connection and collections
-schemas	Request validation models
-utils	Reusable utilities (JWT, hashing)
-middleware	Authentication and request interception   
+---
 
-Module 1: Authentication System
+## Modules
 
-The first module implemented in the backend is the Authentication System, which allows users to register, login, and access protected routes using JWT-based authentication.
+### Module 1 — Authentication
 
-Authentication flow:
+Handles user registration, login, and route protection via JWT.
 
-Client Request
-      ↓
-Router (API endpoint)
-      ↓
-Controller (business logic)
-      ↓
-Database
-      ↓
-JWT Token Generated
-      ↓
-Client stores token
-      ↓
-Token sent with protected requests
-      ↓
-Authentication Middleware verifies token
-Authentication Module Structure
-Authentication Module
-│
-├── Step 1 → Request Schemas (user_schema.py)
-├── Step 2 → Password Security
-├── Step 3 → JWT Token Creation
-├── Step 4 → Auth Controller (signup/login)
-├── Step 5 → Auth Router (API endpoints)
-└── Step 6 → Authentication Middleware
-Step 1: Request Schemas
+**Flow:**
 
-File:
+```
+Client Request → Router → Controller → Hash Password → Save to MongoDB → Issue JWT → Client
+```
 
-app/schemas/user_schema.py
+**Endpoints:**
 
-Pydantic schemas validate incoming request data before it reaches the controller.
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/signup` | Register a new user |
+| `POST` | `/api/auth/login` | Login and receive JWT |
+| `POST` | `/api/auth/logout` | Logout user |
 
-Example schema:
+**Key Files:**
 
-class UserSignup(BaseModel):
-    name: str
-    email: EmailStr
-    password: str
-    skills: List[str]
+- `schemas/user_schema.py` — Pydantic models for request validation
+- `utils/security.py` — `hash_password()` and `verify_password()` using bcrypt
+- `utils/jwt_handler.py` — JWT creation with `id` and `exp` payload
+- `controllers/auth_controller.py` — Signup, login, logout logic
+- `middleware/auth_middleware.py` — Validates `Authorization: Bearer <token>` on protected routes
 
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
+---
 
-Purpose:
+### Module 2 — Interview Slot Scheduling
 
-Validate request payload
+Manages creation, discovery, booking, and cancellation of interview slots.
 
-Enforce required fields
+**Slot Document Schema (MongoDB):**
 
-Ensure correct data types
-
-Equivalent concept in Node.js was handled by Mongoose schema validation.
-
-Step 2: Password Security
-
-File:
-
-app/utils/security.py
-
-Passwords are never stored in plain text. They are hashed using bcrypt.
-
-Functions implemented:
-
-hash_password()
-verify_password()
-
-Example:
-
-hashed_password = hash_password(user.password)
-
-Database stores:
-
-$2b$12$2txldC93ItvHz.uiWtv5pu...
-
-Benefits:
-
-Protects user credentials
-
-Prevents password leaks in case of database compromise
-
-Uses salted hashing
-
-Step 3: JWT Token Creation
-
-File:
-
-app/utils/jwt_handler.py
-
-JWT (JSON Web Token) is used for stateless authentication.
-
-When a user logs in successfully:
-
-JWT Token = create_access_token(user_id)
-
-Token payload contains:
-
+```json
 {
-  id: user_id,
-  exp: expiration_time
+  "createdBy": "user_id",
+  "startTime": "ISO Date",
+  "endTime": "ISO Date",
+  "duration": 60,
+  "skills": ["Python", "System Design"],
+  "isBooked": false,
+  "bookedBy": null,
+  "roomId": null
 }
+```
 
-Token example:
+**Endpoints:**
 
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/slots/create` | Create a new interview slot |
+| `POST` | `/api/slots/book/{slot_id}` | Book an available slot |
+| `GET` | `/api/slots/available` | List all available slots |
+| `GET` | `/api/slots/booked` | List user's booked slots |
+| `DELETE` | `/api/slots/cancel/{slot_id}` | Cancel a slot |
+| `GET` | `/api/slots/created-and-booked` | Slots created by and booked for the user |
 
-Benefits:
+**Booking Rules:**
 
-Stateless authentication
+- A user cannot book their own slot
+- A slot must not already be booked
+- A user cannot have overlapping slot times
 
-No server-side sessions required
+**On successful booking**, the slot is updated:
 
-Scalable architecture
+```json
+{
+  "isBooked": true,
+  "bookedBy": "candidate_id",
+  "roomId": "uuid"
+}
+```
 
-Step 4: Auth Controller
+The `roomId` links directly to the live interview room.
 
-File:
+---
 
-app/controllers/auth_controller.py
+### Module 3 — Real-Time Interview Room
 
-The controller contains business logic for authentication.
+Provides a live interview environment with collaborative code editing and WebRTC signaling over WebSockets.
 
-Signup Logic
-Check if user exists
-      ↓
-Hash password
-      ↓
-Store user in MongoDB
-      ↓
-Generate JWT token
-      ↓
-Return token + user
-Login Logic
-Find user by email
-      ↓
-Verify password
-      ↓
-Generate JWT token
-      ↓
-Return token
+**WebSocket Endpoint:**
 
-Logout simply removes the token on the client side.
+```
+/ws/{room_id}
+```
 
-Step 5: Auth Router
+**Supported Events:**
 
-File:
+| Event | Purpose |
+|---|---|
+| `join-room` | User enters the interview room |
+| `peer-connected` | Notify the other participant of a connection |
+| `signal` | WebRTC signaling for peer-to-peer setup |
+| `code-change` | Sync collaborative code editor state |
 
-app/routers/auth_router.py
+**Code Persistence:**
 
-Routers map API endpoints to controller functions.
+Editor state is saved to `rooms/{room_id}.txt`. On reconnection, an `initial-code` event restores the last known editor content.
 
-Available endpoints:
+**Room Cleanup:**
 
-Method	Endpoint	Description
-POST	/api/auth/signup	Register new user
-POST	/api/auth/login	Authenticate user
-POST	/api/auth/logout	Logout user
+A background scheduler runs `cleanup_rooms()` every hour, removing rooms inactive for more than 5 hours to prevent file accumulation.
 
-Example router:
+---
 
-@router.post("/signup")
-async def signup(user: UserSignup):
-    return await auth_controller.signup(user)
-Step 6: Authentication Middleware
+## Getting Started
 
-File:
+### Prerequisites
 
-app/middleware/auth_middleware.py
+- Python 3.9+
+- MongoDB instance running locally or via Atlas
 
-Middleware verifies JWT tokens before allowing access to protected routes.
+### Installation
 
-Flow:
+```bash
+pip install -r requirements.txt
+```
 
-Request received
-      ↓
-Extract Authorization header
-      ↓
-Decode JWT token
-      ↓
-Fetch user from database
-      ↓
-Attach user to request
+### Running the Server
 
-Example protected route:
+```bash
+uvicorn app.main:app --reload
+```
 
-GET /api/user/me
+| Resource | URL |
+|---|---|
+| API Server | `http://127.0.0.1:8000` |
+| Swagger Docs | `http://127.0.0.1:8000/docs` |
 
-Header required:
+---
 
-Authorization: Bearer TOKEN
-Authentication Flow Summary
-Signup
-   ↓
-User stored in MongoDB
-   ↓
-Login
-   ↓
-Password verification
-   ↓
-JWT token issued
-   ↓
-Token stored on client
-   ↓
-Client sends token in requests
-   ↓
-Middleware validates token
-   ↓
-Protected routes accessible
-API Testing
+## Testing Guide
 
-Authentication APIs can be tested using:
+Recommended end-to-end test sequence using Swagger UI:
 
-FastAPI Swagger Docs
+1. **Signup** — `POST /api/auth/signup`
+2. **Login** — `POST /api/auth/login` → copy JWT token
+3. **Authorize** — Click "Authorize" in Swagger and paste token
+4. **Create Slot** — `POST /api/slots/create`
+5. **View Available Slots** — `GET /api/slots/available`
+6. **Book Slot** — `POST /api/slots/book/{slot_id}`
+7. **Join Interview Room** — Connect via WebSocket at `/ws/{room_id}`
 
-http://127.0.0.1:8000/docs
+---
 
-Thunder Client (VSCode)
+## End-to-End Flow
 
-Postman
+```
+User A signs up
+     ↓
+User A creates an interview slot
+     ↓
+User B browses available slots
+     ↓
+User B books a slot
+     ↓
+Backend generates a unique roomId
+     ↓
+Both users connect to WebSocket room
+     ↓
+Live interview session begins (code editor + WebRTC)
+```
 
-Recommended testing sequence:
+---
 
-1️⃣ /api/auth/signup
-2️⃣ /api/auth/login
-3️⃣ /api/user/me (protected route)
+## Future Improvements
 
-Security Features Implemented
+- **Redis** — Scalable WebSocket pub/sub and room state storage
+- **Docker** — Containerized deployment
+- **Rate Limiting** — Protect public endpoints from abuse
+- **Structured Logging** — Request tracing and error monitoring
+- **Database Indexing** — Optimised MongoDB queries for slots and users
 
-The authentication module includes:
+---
 
-Password hashing with bcrypt
+## Current Status
 
-JWT-based stateless authentication
+| Feature | Status |
+|---|---|
+| User Authentication | ✅ Complete |
+| Interview Slot Scheduling | ✅ Complete |
+| Slot Booking & Validation | ✅ Complete |
+| Real-Time WebSocket Rooms | ✅ Complete |
+| Collaborative Code Editor | ✅ Complete |
+| Persistent Room State | ✅ Complete |
+| Automatic Room Cleanup | ✅ Complete |
 
-Request validation with Pydantic
-
-Protected routes using middleware
-
-Secure user data handling
+> Ready for frontend integration.
